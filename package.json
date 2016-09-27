@@ -4,7 +4,6 @@
   "description": "A module to configure and run Five Bells services for testing.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint ."
   },
   "repository": {
