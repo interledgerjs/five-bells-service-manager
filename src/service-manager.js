@@ -121,7 +121,7 @@ class ServiceManager {
       env: Object.assign({}, COMMON_ENV, {
         CONNECTOR_CREDENTIALS: JSON.stringify(options.credentials),
         CONNECTOR_PAIRS: JSON.stringify(options.pairs),
-        CONNECTOR_MAX_HOLD_TIME: 60,
+        CONNECTOR_MAX_HOLD_TIME: 600,
         CONNECTOR_ROUTE_BROADCAST_ENABLED: options.routeBroadcastEnabled === undefined || options.routeBroadcastEnabled,
         CONNECTOR_ROUTE_BROADCAST_INTERVAL: 10 * 60 * 1000,
         CONNECTOR_ROUTE_EXPIRY: 11 * 60 * 1000, // don't expire routes
@@ -194,13 +194,15 @@ class ServiceManager {
    */
   * _updateAccount (ledger, name, options) {
     const accountURI = this.ledgers[ledger] + '/accounts/' + encodeURIComponent(name)
+    const account = {
+      name: name,
+      password: name,
+      balance: options.balance || '0'
+    }
+    if (options.connector) account.connector = options.connector
     const putAccountRes = yield request.put(accountURI)
       .auth(options.adminUser || this.adminUser, options.adminPass || this.adminPass)
-      .send({
-        name: name,
-        password: name,
-        balance: options.balance || '0'
-      })
+      .send(account)
     if (putAccountRes.statusCode >= 400) {
       throw new Error('Unexpected status code ' + putAccountRes.statusCode)
     }
