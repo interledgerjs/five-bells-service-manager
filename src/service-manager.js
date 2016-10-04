@@ -119,7 +119,7 @@ class ServiceManager {
     this.connectors.push('http://localhost:' + port)
     return this._npm(['start'], 'connector:' + port, {
       env: Object.assign({}, COMMON_ENV, {
-        CONNECTOR_CREDENTIALS: JSON.stringify(options.credentials),
+        CONNECTOR_LEDGERS: JSON.stringify(options.credentials),
         CONNECTOR_PAIRS: JSON.stringify(options.pairs),
         CONNECTOR_MAX_HOLD_TIME: 600,
         CONNECTOR_ROUTE_BROADCAST_ENABLED: options.routeBroadcastEnabled === undefined || options.routeBroadcastEnabled,
