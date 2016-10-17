@@ -285,10 +285,19 @@ class ServiceManager {
     return result
   }
 
-  * sendRoutes (connectorHost, routes) {
+  * sendRoutes (routes, params) {
+    const ledger = params.ledger
     yield request
-      .post(connectorHost + '/routes')
-      .send(routes)
+      .post(this.ledgers[ledger] + '/messages')
+      .auth(params.username, params.password)
+      .send({
+        ledger: this.ledgers[ledger],
+        account: this.ledgers[ledger] + '/accounts/' + encodeURIComponent(params.connectorName),
+        data: {
+          method: 'broadcast_routes',
+          data: routes
+        }
+      })
   }
 
   * assertBalance (ledger, name, expectedBalance) {
