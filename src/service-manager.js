@@ -264,10 +264,6 @@ class ServiceManager {
     const client = new this.Client(clientOpts)
     yield client.connect()
 
-    if (params.onOutgoingReject) {
-      client.once('outgoing_reject', params.onOutgoingReject)
-    }
-
     const quote = yield client.quote({
       sourceAmount: params.sourceAmount,
       destinationAddress: params.destinationAccount,
@@ -280,7 +276,7 @@ class ServiceManager {
     const sourceExpiryDuration = quote.sourceExpiryDuration || 5
     const executionCondition = params.executionCondition || paymentRequest.condition
 
-    return yield client.sendQuotedPayment(Object.assign({
+    yield client.sendQuotedPayment(Object.assign({
       destinationAccount: paymentRequest.address,
       destinationLedger: destinationLedger,
       expiresAt: (new Date(Date.now() + sourceExpiryDuration * 1000)).toISOString(),
@@ -291,6 +287,26 @@ class ServiceManager {
       executionCondition: params.unsafeOptimisticTransport ? undefined : executionCondition,
       unsafeOptimisticTransport: params.unsafeOptimisticTransport
     }, quote))
+
+    if (!params.unsafeOptimisticTransport) {
+      yield new Promise((resolve) => {
+        const done = () => {
+          client.removeListener('outgoing_fulfill', done)
+          client.removeListener('outgoing_reject', handleReject)
+          resolve()
+        }
+
+        const handleReject = (transfer, reason) => {
+          if (params.onOutgoingReject) {
+            params.onOutgoingReject(transfer, reason)
+          }
+          done()
+        }
+
+        client.on('outgoing_fulfill', done)
+        client.on('outgoing_reject', handleReject)
+      })
+    }
   }
 
   * sendPaymentByDestinationAmount (clientOpts, params) {
