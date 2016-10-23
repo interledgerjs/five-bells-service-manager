@@ -26,8 +26,7 @@
     "co": "^4.6.0",
     "superagent": "^2.3.0",
     "supports-color": "^3.1.2",
-    "through2": "^2.0.1",
-    "wait-on": "^1.5.2"
+    "through2": "^2.0.1"
   },
   "devDependencies": {
     "eslint": "^3.5.0",

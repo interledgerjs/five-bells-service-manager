@@ -59,21 +59,33 @@ class ServiceManager {
   }
 
   _npm (args, prefix, options, waitFor) {
-    let cmd = 'npm'
-    if (this.hasCustomNPM) {
-      cmd = this.nodePath
-      args.unshift(this.npmPath)
-    }
-    options = Object.assign({detached: true, stdio: ['ignore', 'ignore', 'ignore']}, options)
-    const formatter = this._getOutputFormatter(prefix)
-    const proc = util.spawnParallel(cmd, args, options, formatter)
+    return new Promise((resolve) => {
+      let cmd = 'npm'
+      if (this.hasCustomNPM) {
+        cmd = this.nodePath
+        args.unshift(this.npmPath)
+      }
+      options = Object.assign({
+        detached: true,
+        stdio: ['ignore', 'ignore', 'ignore']
+      }, options)
 
-    // Keep track of processes so we can kill them later
-    this.processes.push(proc)
+      // Wait for result of process
+      if (waitFor) {
+        options.waitFor = {
+          trigger: waitFor,
+          callback: resolve
+        }
+      } else {
+        resolve()
+      }
 
-    if (!waitFor) return Promise.resolve(null)
-    // Wait for result of process
-    return util.wait(waitFor)
+      const formatter = this._getOutputFormatter(prefix)
+      const proc = util.spawnParallel(cmd, args, options, formatter)
+
+      // Keep track of processes so we can kill them later
+      this.processes.push(proc)
+    })
   }
 
   _getOutputFormatter (prefix) {
@@ -112,7 +124,7 @@ class ServiceManager {
         LEDGER_SIGNING_PUBLIC_KEY: options.notificationPublicKey || ''
       }),
       cwd: path.resolve(this.depsDir, 'five-bells-ledger')
-    }, 'http://localhost:' + port + '/health')
+    }, 'public at')
   }
 
   startConnector (port, options) {
@@ -137,7 +149,7 @@ class ServiceManager {
         CONNECTOR_NOTIFICATION_KEYS: options.notificationKeys ? JSON.stringify(options.notificationKeys) : ''
       }),
       cwd: path.resolve(this.depsDir, 'ilp-connector')
-    }, 'http://localhost:' + port + '/health')
+    }, 'public at')
   }
 
   startNotary (port, options) {
@@ -152,7 +164,7 @@ class ServiceManager {
         NOTARY_ED25519_PUBLIC_KEY: options.publicKey
       }),
       cwd: path.resolve(this.depsDir, 'five-bells-notary')
-    }, 'http://localhost:' + port + '/health')
+    }, 'public at')
   }
 
   startVisualization (port) {
