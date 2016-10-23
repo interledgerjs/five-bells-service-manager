@@ -7,6 +7,8 @@ const co = require('co')
 const request = require('superagent')
 const util = require('./util')
 const chalk = require('chalk')
+const sqlite = require('sqlite')
+const hashPassword = require('five-bells-shared/utils/hashPassword')
 
 const COMMON_ENV = Object.assign({}, {
   // Path is required for NPM to work properly
@@ -19,6 +21,8 @@ const COMMON_ENV = Object.assign({}, {
   DEBUG_COLORS: 1,
   npm_config_color: 'always'
 })
+
+const LEDGER_DEFAULT_SCALE = 4
 
 class ServiceManager {
   /**
@@ -46,6 +50,7 @@ class ServiceManager {
     this.hasCustomNPM = this.nodePath && this.npmPath
     this.processes = []
     this.ledgers = {} // { name ⇒ host }
+    this.ledgerOptions = {} // { name ⇒ options }
     this.connectors = [] // [host]
     this.receivers = {} // { name ⇒ Receiver }
 
@@ -108,8 +113,9 @@ class ServiceManager {
   }
 
   startLedger (prefix, port, options) {
-    const dbPath = path.resolve(this.dataDir, './' + prefix + 'sqlite')
+    const dbPath = this._getLedgerDbPath(prefix)
     this.ledgers[prefix] = 'http://localhost:' + port
+    this.ledgerOptions[prefix] = options
     return this._npm(['start'], 'ledger:' + port, {
       env: Object.assign({}, COMMON_ENV, {
         LEDGER_DB_URI: 'sqlite://' + dbPath,
@@ -119,7 +125,7 @@ class ServiceManager {
         LEDGER_ILP_PREFIX: prefix,
         LEDGER_ADMIN_USER: this.adminUser,
         LEDGER_ADMIN_PASS: this.adminPass,
-        LEDGER_AMOUNT_SCALE: options.scale || '4',
+        LEDGER_AMOUNT_SCALE: options.scale || String(LEDGER_DEFAULT_SCALE),
         LEDGER_SIGNING_PRIVATE_KEY: options.notificationPrivateKey || '',
         LEDGER_SIGNING_PUBLIC_KEY: options.notificationPublicKey || ''
       }),
@@ -205,31 +211,35 @@ class ServiceManager {
    * @param {String} options.adminPass
    */
   * _updateAccount (ledger, name, options) {
-    const accountURI = this.ledgers[ledger] + '/accounts/' + encodeURIComponent(name)
-    const account = {
-      name: name,
-      password: name,
-      balance: options.balance || '0'
-    }
-    if (options.connector) account.connector = options.connector
-    const putAccountRes = yield request.put(accountURI)
-      .auth(options.adminUser || this.adminUser, options.adminPass || this.adminPass)
-      .send(account)
-    if (putAccountRes.statusCode >= 400) {
-      throw new Error('Unexpected status code ' + putAccountRes.statusCode)
-    }
-    return putAccountRes
+    const db = yield this._getLedgerDb(ledger)
+    const password = (yield hashPassword(name)).toString('base64')
+    yield db.run(
+      'INSERT OR REPLACE INTO L_ACCOUNTS (NAME, PASSWORD_HASH, BALANCE, CONNECTOR) VALUES (?, ?, ?, ?)',
+      [ name, password, options.balance || 0, options.connector || null ]
+    )
   }
 
   updateAccount (ledger, name, options) {
     return co.wrap(this._updateAccount).call(this, ledger, name, options || {})
   }
 
+  _getLedgerDbPath (ledgerPrefix) {
+    return path.resolve(this.dataDir, './' + ledgerPrefix + 'sqlite')
+  }
+
+  * _getLedgerDb (ledgerPrefix) {
+    const dbPath = this._getLedgerDbPath(ledgerPrefix)
+    return yield sqlite.open(dbPath)
+  }
+
   * _getBalance (ledger, name, options) {
-    const accountURI = this.ledgers[ledger] + '/accounts/' + encodeURIComponent(name)
-    const getAccountRes = yield request.get(accountURI)
-      .auth(options.adminUser || this.adminUser, options.adminPass || this.adminPass)
-    return getAccountRes.body && getAccountRes.body.balance
+    const db = yield this._getLedgerDb(ledger)
+    const balance = yield db.get('SELECT BALANCE FROM L_ACCOUNTS WHERE NAME = ?', name)
+    const scale = (typeof this.ledgerOptions[ledger].scale !== 'undefined')
+      ? this.ledgerOptions[ledger].scale
+      : LEDGER_DEFAULT_SCALE
+
+    return Number(balance.BALANCE.toFixed(scale))
   }
 
   getBalance (ledger, name, options) {
