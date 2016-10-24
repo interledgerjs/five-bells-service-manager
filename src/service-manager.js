@@ -7,6 +7,8 @@ const co = require('co')
 const request = require('superagent')
 const util = require('./util')
 const chalk = require('chalk')
+const sqlite = require('sqlite')
+const hashPassword = require('five-bells-shared/utils/hashPassword')
 
 const COMMON_ENV = Object.assign({}, {
   // Path is required for NPM to work properly
@@ -19,6 +21,8 @@ const COMMON_ENV = Object.assign({}, {
   DEBUG_COLORS: 1,
   npm_config_color: 'always'
 })
+
+const LEDGER_DEFAULT_SCALE = 4
 
 class ServiceManager {
   /**
@@ -46,6 +50,7 @@ class ServiceManager {
     this.hasCustomNPM = this.nodePath && this.npmPath
     this.processes = []
     this.ledgers = {} // { name ⇒ host }
+    this.ledgerOptions = {} // { name ⇒ options }
     this.connectors = [] // [host]
     this.receivers = {} // { name ⇒ Receiver }
 
@@ -59,21 +64,33 @@ class ServiceManager {
   }
 
   _npm (args, prefix, options, waitFor) {
-    let cmd = 'npm'
-    if (this.hasCustomNPM) {
-      cmd = this.nodePath
-      args.unshift(this.npmPath)
-    }
-    options = Object.assign({detached: true, stdio: ['ignore', 'ignore', 'ignore']}, options)
-    const formatter = this._getOutputFormatter(prefix)
-    const proc = util.spawnParallel(cmd, args, options, formatter)
+    return new Promise((resolve) => {
+      let cmd = 'npm'
+      if (this.hasCustomNPM) {
+        cmd = this.nodePath
+        args.unshift(this.npmPath)
+      }
+      options = Object.assign({
+        detached: true,
+        stdio: ['ignore', 'ignore', 'ignore']
+      }, options)
 
-    // Keep track of processes so we can kill them later
-    this.processes.push(proc)
+      // Wait for result of process
+      if (waitFor) {
+        options.waitFor = {
+          trigger: waitFor,
+          callback: resolve
+        }
+      } else {
+        resolve()
+      }
 
-    if (!waitFor) return Promise.resolve(null)
-    // Wait for result of process
-    return util.wait(waitFor)
+      const formatter = this._getOutputFormatter(prefix)
+      const proc = util.spawnParallel(cmd, args, options, formatter)
+
+      // Keep track of processes so we can kill them later
+      this.processes.push(proc)
+    })
   }
 
   _getOutputFormatter (prefix) {
@@ -96,8 +113,9 @@ class ServiceManager {
   }
 
   startLedger (prefix, port, options) {
-    const dbPath = path.resolve(this.dataDir, './' + prefix + 'sqlite')
+    const dbPath = this._getLedgerDbPath(prefix)
     this.ledgers[prefix] = 'http://localhost:' + port
+    this.ledgerOptions[prefix] = options
     return this._npm(['start'], 'ledger:' + port, {
       env: Object.assign({}, COMMON_ENV, {
         LEDGER_DB_URI: 'sqlite://' + dbPath,
@@ -107,12 +125,12 @@ class ServiceManager {
         LEDGER_ILP_PREFIX: prefix,
         LEDGER_ADMIN_USER: this.adminUser,
         LEDGER_ADMIN_PASS: this.adminPass,
-        LEDGER_AMOUNT_SCALE: options.scale || '4',
+        LEDGER_AMOUNT_SCALE: options.scale || String(LEDGER_DEFAULT_SCALE),
         LEDGER_SIGNING_PRIVATE_KEY: options.notificationPrivateKey || '',
         LEDGER_SIGNING_PUBLIC_KEY: options.notificationPublicKey || ''
       }),
       cwd: path.resolve(this.depsDir, 'five-bells-ledger')
-    }, 'http://localhost:' + port + '/health')
+    }, 'public at')
   }
 
   startConnector (port, options) {
@@ -137,7 +155,7 @@ class ServiceManager {
         CONNECTOR_NOTIFICATION_KEYS: options.notificationKeys ? JSON.stringify(options.notificationKeys) : ''
       }),
       cwd: path.resolve(this.depsDir, 'ilp-connector')
-    }, 'http://localhost:' + port + '/health')
+    }, 'public at')
   }
 
   startNotary (port, options) {
@@ -152,7 +170,7 @@ class ServiceManager {
         NOTARY_ED25519_PUBLIC_KEY: options.publicKey
       }),
       cwd: path.resolve(this.depsDir, 'five-bells-notary')
-    }, 'http://localhost:' + port + '/health')
+    }, 'public at')
   }
 
   startVisualization (port) {
@@ -193,31 +211,35 @@ class ServiceManager {
    * @param {String} options.adminPass
    */
   * _updateAccount (ledger, name, options) {
-    const accountURI = this.ledgers[ledger] + '/accounts/' + encodeURIComponent(name)
-    const account = {
-      name: name,
-      password: name,
-      balance: options.balance || '0'
-    }
-    if (options.connector) account.connector = options.connector
-    const putAccountRes = yield request.put(accountURI)
-      .auth(options.adminUser || this.adminUser, options.adminPass || this.adminPass)
-      .send(account)
-    if (putAccountRes.statusCode >= 400) {
-      throw new Error('Unexpected status code ' + putAccountRes.statusCode)
-    }
-    return putAccountRes
+    const db = yield this._getLedgerDb(ledger)
+    const password = (yield hashPassword(name)).toString('base64')
+    yield db.run(
+      'INSERT OR REPLACE INTO L_ACCOUNTS (NAME, PASSWORD_HASH, BALANCE, CONNECTOR) VALUES (?, ?, ?, ?)',
+      [ name, password, options.balance || 0, options.connector || null ]
+    )
   }
 
   updateAccount (ledger, name, options) {
     return co.wrap(this._updateAccount).call(this, ledger, name, options || {})
   }
 
+  _getLedgerDbPath (ledgerPrefix) {
+    return path.resolve(this.dataDir, './' + ledgerPrefix + 'sqlite')
+  }
+
+  * _getLedgerDb (ledgerPrefix) {
+    const dbPath = this._getLedgerDbPath(ledgerPrefix)
+    return yield sqlite.open(dbPath)
+  }
+
   * _getBalance (ledger, name, options) {
-    const accountURI = this.ledgers[ledger] + '/accounts/' + encodeURIComponent(name)
-    const getAccountRes = yield request.get(accountURI)
-      .auth(options.adminUser || this.adminUser, options.adminPass || this.adminPass)
-    return getAccountRes.body && getAccountRes.body.balance
+    const db = yield this._getLedgerDb(ledger)
+    const balance = yield db.get('SELECT BALANCE FROM L_ACCOUNTS WHERE NAME = ?', name)
+    const scale = (typeof this.ledgerOptions[ledger].scale !== 'undefined')
+      ? this.ledgerOptions[ledger].scale
+      : LEDGER_DEFAULT_SCALE
+
+    return Number(balance.BALANCE.toFixed(scale))
   }
 
   getBalance (ledger, name, options) {
@@ -242,10 +264,6 @@ class ServiceManager {
     const client = new this.Client(clientOpts)
     yield client.connect()
 
-    if (params.onOutgoingReject) {
-      client.once('outgoing_reject', params.onOutgoingReject)
-    }
-
     const quote = yield client.quote({
       sourceAmount: params.sourceAmount,
       destinationAddress: params.destinationAccount,
@@ -258,7 +276,7 @@ class ServiceManager {
     const sourceExpiryDuration = quote.sourceExpiryDuration || 5
     const executionCondition = params.executionCondition || paymentRequest.condition
 
-    return yield client.sendQuotedPayment(Object.assign({
+    yield client.sendQuotedPayment(Object.assign({
       destinationAccount: paymentRequest.address,
       destinationLedger: destinationLedger,
       expiresAt: (new Date(Date.now() + sourceExpiryDuration * 1000)).toISOString(),
@@ -269,6 +287,26 @@ class ServiceManager {
       executionCondition: params.unsafeOptimisticTransport ? undefined : executionCondition,
       unsafeOptimisticTransport: params.unsafeOptimisticTransport
     }, quote))
+
+    if (!params.unsafeOptimisticTransport) {
+      yield new Promise((resolve) => {
+        const done = () => {
+          client.removeListener('outgoing_fulfill', done)
+          client.removeListener('outgoing_reject', handleReject)
+          resolve()
+        }
+
+        const handleReject = (transfer, reason) => {
+          if (params.onOutgoingReject) {
+            params.onOutgoingReject(transfer, reason)
+          }
+          done()
+        }
+
+        client.on('outgoing_fulfill', done)
+        client.on('outgoing_reject', handleReject)
+      })
+    }
   }
 
   * sendPaymentByDestinationAmount (clientOpts, params) {
