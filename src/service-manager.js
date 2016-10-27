@@ -51,7 +51,7 @@ class ServiceManager {
     this.processes = []
     this.ledgers = {} // { name ⇒ host }
     this.ledgerOptions = {} // { name ⇒ options }
-    this.connectors = [] // [host]
+    this.connectors = {} // { connectorAccount ⇒ [ ["source_asset@source_ledger", "destination_asset@destination_ledger"] ] }
     this.receivers = {} // { name ⇒ Receiver }
 
     this.Client = require(path.resolve(depsDir, 'ilp-core')).Client
@@ -133,9 +133,9 @@ class ServiceManager {
     }, 'public at')
   }
 
-  startConnector (port, options) {
-    this.connectors.push('http://localhost:' + port)
-    return this._npm(['start'], 'connector:' + port, {
+  startConnector (name, options) {
+    this.connectors[name] = options.pairs
+    return this._npm(['start'], name, {
       env: Object.assign({}, COMMON_ENV, {
         CONNECTOR_LEDGERS: JSON.stringify(options.credentials),
         CONNECTOR_PAIRS: JSON.stringify(options.pairs),
@@ -146,8 +146,6 @@ class ServiceManager {
         CONNECTOR_AUTOLOAD_PEERS: true,
         CONNECTOR_FX_SPREAD: options.fxSpread || '',
         CONNECTOR_SLIPPAGE: options.slippage || '',
-        CONNECTOR_HOSTNAME: 'localhost',
-        CONNECTOR_PORT: port,
         CONNECTOR_ADMIN_USER: this.adminUser,
         CONNECTOR_ADMIN_PASS: this.adminPass,
         CONNECTOR_BACKEND: options.backend || 'one-to-one',
@@ -155,7 +153,7 @@ class ServiceManager {
         CONNECTOR_NOTIFICATION_KEYS: options.notificationKeys ? JSON.stringify(options.notificationKeys) : ''
       }),
       cwd: path.resolve(this.depsDir, 'ilp-connector')
-    }, 'public at')
+    }, 'connector ready')
   }
 
   startNotary (port, options) {
@@ -177,6 +175,7 @@ class ServiceManager {
     return this._npm(['start'], 'visualization:' + port, {
       env: Object.assign({}, COMMON_ENV, {
         VISUALIZATION_LEDGERS: JSON.stringify(this.ledgers),
+        VISUALIZATION_CONNECTORS: JSON.stringify(this.connectors),
         VISUALIZATION_RECRAWL_INTERVAL: 30000,
         HOSTNAME: 'localhost',
         PORT: port,
@@ -209,6 +208,7 @@ class ServiceManager {
    * @param {Amount} options.balance
    * @param {String} options.adminUser
    * @param {String} options.adminPass
+   * @param {String} options.connector
    */
   * _updateAccount (ledger, name, options) {
     const db = yield this._getLedgerDb(ledger)
