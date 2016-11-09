@@ -214,8 +214,8 @@ class ServiceManager {
     const db = yield this._getLedgerDb(ledger)
     const password = (yield hashPassword(name)).toString('base64')
     yield db.run(
-      'INSERT OR REPLACE INTO L_ACCOUNTS (NAME, PASSWORD_HASH, BALANCE, CONNECTOR) VALUES (?, ?, ?, ?)',
-      [ name, password, options.balance || 0, options.connector || null ]
+      'INSERT OR REPLACE INTO L_ACCOUNTS (NAME, PASSWORD_HASH, BALANCE) VALUES (?, ?, ?)',
+      [ name, password, options.balance || 0 ]
     )
   }
 
