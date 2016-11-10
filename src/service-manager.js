@@ -127,7 +127,8 @@ class ServiceManager {
         LEDGER_ADMIN_PASS: this.adminPass,
         LEDGER_AMOUNT_SCALE: options.scale || String(LEDGER_DEFAULT_SCALE),
         LEDGER_SIGNING_PRIVATE_KEY: options.notificationPrivateKey || '',
-        LEDGER_SIGNING_PUBLIC_KEY: options.notificationPublicKey || ''
+        LEDGER_SIGNING_PUBLIC_KEY: options.notificationPublicKey || '',
+        LEDGER_RECOMMENDED_CONNECTORS: options.recommendedConnectors || ''
       }),
       cwd: path.resolve(this.depsDir, 'five-bells-ledger')
     }, 'public at')
