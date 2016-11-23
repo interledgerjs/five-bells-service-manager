@@ -1,6 +1,6 @@
 {
   "name": "five-bells-service-manager",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "description": "A module to configure and run Five Bells services for testing.",
   "main": "index.js",
   "scripts": {
