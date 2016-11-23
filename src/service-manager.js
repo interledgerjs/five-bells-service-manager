@@ -331,7 +331,8 @@ class ServiceManager {
       .auth(params.username, params.password)
       .send({
         ledger: this.ledgers[ledger],
-        account: this.ledgers[ledger] + '/accounts/' + encodeURIComponent(params.connectorName),
+        from: this.ledgers[ledger] + '/accounts/' + encodeURIComponent(params.username),
+        to: this.ledgers[ledger] + '/accounts/' + encodeURIComponent(params.connectorName),
         data: {
           method: 'broadcast_routes',
           data: routes
