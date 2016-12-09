@@ -13,8 +13,9 @@ const hashPassword = require('five-bells-shared/utils/hashPassword')
 const COMMON_ENV = Object.assign({}, {
   // Path is required for NPM to work properly
   PATH: process.env.PATH,
-  // Print additional debug information from Five Bells and ILP modules
-  DEBUG: 'five-bells-*,ilp-*'
+  // Print additional debug information from Five Bells and ILP modules, but
+  // allow the user to override this setting.
+  DEBUG: process.env.DEBUG || 'ledger*,connector*,notary*,five-bells*,ilp-*'
 }, !require('supports-color') ? {} : {
   // Force colored output
   FORCE_COLOR: 1,
