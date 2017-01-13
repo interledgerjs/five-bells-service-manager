@@ -15,7 +15,7 @@ const COMMON_ENV = Object.assign({}, {
   PATH: process.env.PATH,
   // Print additional debug information from Five Bells and ILP modules, but
   // allow the user to override this setting.
-  DEBUG: process.env.DEBUG || 'ledger*,connector*,notary*,five-bells*,ilp-*'
+  DEBUG: process.env.DEBUG || 'ledger*,connector*,notary*,five-bells*,ilp*'
 }, !require('supports-color') ? {} : {
   // Force colored output
   FORCE_COLOR: 1,
@@ -111,6 +111,32 @@ class ServiceManager {
         console.error('could not kill pid ' + pid)
       }
     }
+  }
+
+  startKit (kitName, config) {
+    // the same DB is used by ledger and kit
+    const dbPath = this._getLedgerDbPath(config.LEDGER_ILP_PREFIX)
+
+    const ledgerUri = 'http://localhost:' + config.CLIENT_PORT + '/ledger'
+    this.ledgers[config.LEDGER_ILP_PREFIX] = ledgerUri
+    this.ledgerOptions[config.LEDGER_ILP_PREFIX] = config
+
+    // this overwrites values set in the config file
+    const customEnv = {
+      API_CONFIG_FILE: config.apiConfigFile || '',
+      DB_URI: 'sqlite://' + dbPath,
+      LEDGER_AMOUNT_SCALE: config.scale || String(LEDGER_DEFAULT_SCALE)
+    }
+    const env = { env: Object.assign(COMMON_ENV, customEnv) }
+
+    const cwd = {
+      cwd: path.resolve(this.depsDir, 'ilp-kit')
+    }
+    let npmOpts = Object.assign(cwd, env)
+    let loggingPrefix = `ilp-kit[${kitName}]`
+
+    // kit will start ledger and connector by itself
+    return this._npm(['start'], loggingPrefix, npmOpts, 'public at')
   }
 
   startLedger (prefix, port, options) {
@@ -221,8 +247,27 @@ class ServiceManager {
     )
   }
 
+  /**
+   * Updates an account specified by parameter name on a ledger specified by parameter ledger.
+   * @param  {String} ledger  Ledger prefix identifying the ledger that holds the updated account.
+   * @param  {String} name    Name of the updated account.
+   * @param  {JSON}   options Used to specify the balance to which the account is updated. Use options.balance.
+   * @return {[Promise]}
+   */
   updateAccount (ledger, name, options) {
     return co.wrap(this._updateAccount).call(this, ledger, name, options || {})
+  }
+
+  * _updateKitAccount (ledgerPrefix, username) {
+    const db = yield this._getLedgerDb(ledgerPrefix)
+    yield db.run(
+      'INSERT OR REPLACE INTO Users (username, created_at, updated_at) VALUES (?, ?, ?)',
+      [ username, '2017-01-10 16:12:17.039 +00:00', '2017-01-10 16:12:17.039 +00:00' ]
+    )
+  }
+
+  updateKitAccount (ledgerPrefix, username) {
+    return co.wrap(this._updateKitAccount).call(this, ledgerPrefix, username)
   }
 
   _getLedgerDbPath (ledgerPrefix) {
