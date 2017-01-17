@@ -168,6 +168,7 @@ class ServiceManager {
         CONNECTOR_LEDGERS: JSON.stringify(options.credentials),
         CONNECTOR_PAIRS: JSON.stringify(options.pairs),
         CONNECTOR_MAX_HOLD_TIME: 600,
+        CONNECTOR_ROUTES: JSON.stringify(options.routes || []),
         CONNECTOR_ROUTE_BROADCAST_ENABLED: options.routeBroadcastEnabled === undefined || options.routeBroadcastEnabled,
         CONNECTOR_ROUTE_BROADCAST_INTERVAL: 10 * 60 * 1000,
         CONNECTOR_ROUTE_EXPIRY: 11 * 60 * 1000, // don't expire routes
