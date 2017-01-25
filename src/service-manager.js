@@ -124,6 +124,7 @@ class ServiceManager {
     // this overwrites values set in the config file
     const customEnv = {
       API_CONFIG_FILE: config.apiConfigFile || '',
+      CONNECTOR_ROUTE_BROADCAST_INTERVAL: 10000,
       DB_URI: 'sqlite://' + dbPath,
       LEDGER_AMOUNT_SCALE: config.scale || String(LEDGER_DEFAULT_SCALE)
     }
@@ -269,6 +270,35 @@ class ServiceManager {
 
   updateKitAccount (ledgerPrefix, username) {
     return co.wrap(this._updateKitAccount).call(this, ledgerPrefix, username)
+  }
+
+  * _getPluginStoreTable (ledgerPrefix) {
+    const db = yield this._getLedgerDb(ledgerPrefix)
+    const rows = yield db.all('SELECT name FROM sqlite_master WHERE type="table"')
+    for (const row of rows) {
+      const name = row.name
+      if (name.startsWith('plugin_store')) {
+        return name
+      }
+    }
+    // sometimes the plugin store table does not exist yet,
+    // because no transfer has yet been send
+    return ''
+  }
+
+  * _updateTrustlineBalance (ledgerPrefix, balance) {
+    const db = yield this._getLedgerDb(ledgerPrefix)
+    const pluginStore = yield this._getPluginStoreTable(ledgerPrefix)
+    if (pluginStore) {
+      yield db.run('UPDATE "' + pluginStore + '" ' +
+                   'SET value = ? WHERE key = "balance__"',
+                  [ balance ])
+    }
+  }
+
+  updateTrustlineBalance (ledgerPrefix, balance) {
+    return co.wrap(this._updateTrustlineBalance)
+      .call(this, ledgerPrefix, balance)
   }
 
   _getLedgerDbPath (ledgerPrefix) {
