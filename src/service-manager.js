@@ -124,7 +124,6 @@ class ServiceManager {
     // this overwrites values set in the config file
     const customEnv = {
       API_CONFIG_FILE: config.apiConfigFile || '',
-      CONNECTOR_ROUTE_BROADCAST_INTERVAL: 10000,
       DB_URI: 'sqlite://' + dbPath,
       LEDGER_AMOUNT_SCALE: config.scale || String(LEDGER_DEFAULT_SCALE)
     }
@@ -137,7 +136,7 @@ class ServiceManager {
     let loggingPrefix = `ilp-kit[${kitName}]`
 
     // kit will start ledger and connector by itself
-    return this._npm(['start'], loggingPrefix, npmOpts, 'public at')
+    return this._npm(['start'], loggingPrefix, npmOpts, 'ILP Kit is running')
   }
 
   startLedger (prefix, port, options) {
