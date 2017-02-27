@@ -357,10 +357,10 @@ class ServiceManager {
       destinationAccount: paymentRequest.address,
       destinationLedger: destinationLedger,
       expiresAt: (new Date(Date.now() + sourceExpiryDuration * 1000)).toISOString(),
-      destinationMemo: {
+      destinationMemo: Object.assign({
         expires_at: paymentRequest.expires_at,
         data: paymentRequest.data
-      },
+      }, params.overrideMemoParams),
       executionCondition: params.unsafeOptimisticTransport ? undefined : executionCondition,
       unsafeOptimisticTransport: params.unsafeOptimisticTransport
     }, quote))
