@@ -355,7 +355,7 @@ class ServiceManager {
 
     yield client.sendQuotedPayment(Object.assign(quote, {
       destinationAccount: paymentRequest.address,
-      destinationAmount: paymentRequest.destinationAmount,
+      destinationAmount: paymentRequest.amount,
       destinationLedger: destinationLedger,
       expiresAt: (new Date(Date.now() + sourceExpiryDuration * 1000)).toISOString(),
       destinationMemo: Object.assign({
