@@ -353,8 +353,9 @@ class ServiceManager {
     const sourceExpiryDuration = quote.sourceExpiryDuration || 5
     const executionCondition = params.executionCondition || paymentRequest.condition
 
-    yield client.sendQuotedPayment(Object.assign({
+    yield client.sendQuotedPayment(Object.assign(quote, {
       destinationAccount: paymentRequest.address,
+      destinationAmount: paymentRequest.destinationAmount,
       destinationLedger: destinationLedger,
       expiresAt: (new Date(Date.now() + sourceExpiryDuration * 1000)).toISOString(),
       destinationMemo: Object.assign({
@@ -363,7 +364,7 @@ class ServiceManager {
       }, params.overrideMemoParams),
       executionCondition: params.unsafeOptimisticTransport ? undefined : executionCondition,
       unsafeOptimisticTransport: params.unsafeOptimisticTransport
-    }, quote))
+    }))
 
     if (!params.unsafeOptimisticTransport) {
       yield new Promise((resolve) => {
