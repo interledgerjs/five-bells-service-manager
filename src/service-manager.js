@@ -8,6 +8,7 @@ const request = require('superagent')
 const util = require('./util')
 const chalk = require('chalk')
 const sqlite = require('sqlite')
+const BigNumber = require('bignumber.js')
 const hashPassword = require('five-bells-shared/utils/hashPassword')
 
 const COMMON_ENV = Object.assign({}, {
@@ -341,13 +342,15 @@ class ServiceManager {
     const client = new this.Client(clientOpts)
     yield client.connect()
 
-    const quote = yield client.quote({
-      sourceAmount: params.sourceAmount,
-      destinationAddress: params.destinationAccount,
-      destinationPrecision: params.destinationPrecision,
-      destinationScale: params.destinationScale
-    })
+    const sourceLedger = parseAddress(params.sourceAccount).ledger
     const destinationLedger = parseAddress(params.destinationAccount).ledger
+    const sourceScale = this.ledgerOptions[sourceLedger].scale || LEDGER_DEFAULT_SCALE
+    const sourceAmountInteger = (new BigNumber(params.sourceAmount)).shift(sourceScale)
+
+    const quote = yield client.quote({
+      sourceAmount: sourceAmountInteger.toString(),
+      destinationAddress: params.destinationAccount
+    })
     const paymentRequest = this.receivers[destinationLedger].createRequest(
       {amount: quote.destinationAmount})
     const sourceExpiryDuration = quote.sourceExpiryDuration || 5
@@ -394,8 +397,10 @@ class ServiceManager {
 
     const sender = this.ilp.createSender(clientOpts)
     const destinationLedger = parseAddress(params.destinationAccount).ledger
+    const destinationScale = this.ledgerOptions[destinationLedger].scale || LEDGER_DEFAULT_SCALE
+    const destinationAmountInteger = (new BigNumber(params.destinationAmount)).shift(destinationScale)
     const paymentRequest = this.receivers[destinationLedger].createRequest(
-      {amount: params.destinationAmount})
+      {amount: destinationAmountInteger.toString()})
     const paymentParams = yield sender.quoteRequest(paymentRequest)
     const result = yield sender.payRequest(paymentParams)
     return result
