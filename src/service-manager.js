@@ -7,9 +7,11 @@ const co = require('co')
 const request = require('superagent')
 const util = require('./util')
 const chalk = require('chalk')
-const sqlite = require('sqlite')
 const BigNumber = require('bignumber.js')
 const hashPassword = require('five-bells-shared/utils/hashPassword')
+const pgp = require('pg-promise')()
+// Connection to the postgres master db shared by all ServiceManager instances
+const masterdb = pgp({database: 'postgres'})
 
 const COMMON_ENV = Object.assign({}, {
   // Path is required for NPM to work properly
@@ -46,6 +48,9 @@ class ServiceManager {
     const opts = _opts || {}
     this.adminUser = opts.adminUser || 'admin'
     this.adminPass = opts.adminPass || 'admin'
+
+    this.dbUser = process.env.USER
+    this.dbs = {} // stores the connection object for each database
 
     this.nodePath = process.env.npm_node_execpath
     this.npmPath = process.env.npm_execpath
@@ -114,9 +119,9 @@ class ServiceManager {
     }
   }
 
-  startKit (kitName, config) {
-    // the same DB is used by ledger and kit
-    const dbPath = this._getLedgerDbPath(config.LEDGER_ILP_PREFIX)
+  * _startKit (kitName, config) {
+    yield this._createPostgresDb(config.LEDGER_ILP_PREFIX)
+    const dbUri = this._getDbConnectionString(config.LEDGER_ILP_PREFIX)
 
     const ledgerUri = 'http://localhost:' + config.CLIENT_PORT + '/ledger'
     this.ledgers[config.LEDGER_ILP_PREFIX] = ledgerUri
@@ -125,7 +130,7 @@ class ServiceManager {
     // this overwrites values set in the config file
     const customEnv = {
       API_CONFIG_FILE: config.apiConfigFile || '',
-      DB_URI: 'sqlite://' + dbPath,
+      DB_URI: dbUri,
       LEDGER_AMOUNT_SCALE: config.scale || String(LEDGER_DEFAULT_SCALE)
     }
     const env = { env: Object.assign(COMMON_ENV, customEnv) }
@@ -137,16 +142,21 @@ class ServiceManager {
     let loggingPrefix = `ilp-kit[${kitName}]`
 
     // kit will start ledger and connector by itself
-    return this._npm(['start'], loggingPrefix, npmOpts, 'ILP Kit is running')
+    return this._npm(['start'], loggingPrefix, npmOpts, 'wallet listening on 0.0.0.0:')
   }
 
-  startLedger (prefix, port, options) {
-    const dbPath = this._getLedgerDbPath(prefix)
+  startKit (kitName, config) {
+    return co.wrap(this._startKit).call(this, kitName, config)
+  }
+
+  * _startLedger (prefix, port, options) {
+    yield this._createPostgresDb(prefix)
+    const dbUri = this._getDbConnectionString(prefix)
     this.ledgers[prefix] = 'http://localhost:' + port
     this.ledgerOptions[prefix] = options
     return this._npm(['start'], 'ledger:' + port, {
       env: Object.assign({}, COMMON_ENV, {
-        LEDGER_DB_URI: 'sqlite://' + dbPath,
+        LEDGER_DB_URI: dbUri,
         LEDGER_DB_SYNC: true,
         LEDGER_HOSTNAME: 'localhost',
         LEDGER_PORT: port,
@@ -160,6 +170,10 @@ class ServiceManager {
       }),
       cwd: path.resolve(this.depsDir, 'five-bells-ledger')
     }, 'public at')
+  }
+
+  startLedger (prefix, port, options) {
+    return co.wrap(this._startLedger).call(this, prefix, port, options)
   }
 
   startConnector (name, options) {
@@ -243,9 +257,17 @@ class ServiceManager {
   * _updateAccount (ledger, name, options) {
     const db = yield this._getLedgerDb(ledger)
     const password = (yield hashPassword(name)).toString('base64')
-    yield db.run(
-      'INSERT OR REPLACE INTO L_ACCOUNTS (NAME, PASSWORD_HASH, BALANCE) VALUES (?, ?, ?)',
-      [ name, password, options.balance || 0 ]
+    yield db.none( // insert or update account
+      'INSERT INTO "L_ACCOUNTS" AS t ("NAME", "PASSWORD_HASH", "BALANCE") ' +
+        'VALUES ($/name/, $/password/, $/balance/) ' +
+        'ON CONFLICT ("NAME") DO UPDATE ' +
+        'SET "PASSWORD_HASH"=$/password/, "BALANCE"=$/balance/ ' +
+        'WHERE t."NAME"=$/name/',
+      { // named parameters
+        name: name,
+        password: password,
+        balance: options.balance || 0
+      }
     )
   }
 
@@ -262,8 +284,9 @@ class ServiceManager {
 
   * _updateKitAccount (ledgerPrefix, username) {
     const db = yield this._getLedgerDb(ledgerPrefix)
-    yield db.run(
-      'INSERT OR REPLACE INTO Users (username, created_at, updated_at) VALUES (?, ?, ?)',
+    yield db.none(
+      'INSERT INTO "Users" (username, created_at, updated_at) VALUES ($1, $2, $3) ' +
+      'ON CONFLICT DO NOTHING',
       [ username, '2017-01-10 16:12:17.039 +00:00', '2017-01-10 16:12:17.039 +00:00' ]
     )
   }
@@ -274,23 +297,26 @@ class ServiceManager {
 
   * _getPluginStoreTable (ledgerPrefix) {
     const db = yield this._getLedgerDb(ledgerPrefix)
-    const rows = yield db.all('SELECT name FROM sqlite_master WHERE type="table"')
-    for (const row of rows) {
-      const name = row.name
-      if (name.startsWith('plugin_store')) {
-        return name
+    try {
+      const pluginStore = yield db.one('SELECT table_name ' +
+                                       'FROM information_schema.tables ' +
+                                       'WHERE table_name ~ \'^plugin_store_\'')
+      return pluginStore
+    } catch (e) {
+      if (e.code === pgp.errors.queryResultErrorCode.noData) {
+        // sometimes the plugin store table does not exist yet,
+        // because no transfer has yet been send
+        return ''
       }
+      throw e
     }
-    // sometimes the plugin store table does not exist yet,
-    // because no transfer has yet been send
-    return ''
   }
 
   * _updateTrustlineBalance (ledgerPrefix, balance) {
     const db = yield this._getLedgerDb(ledgerPrefix)
     const pluginStore = yield this._getPluginStoreTable(ledgerPrefix)
     if (pluginStore) {
-      yield db.run('UPDATE "' + pluginStore + '" ' +
+      yield db.none('UPDATE "' + pluginStore + '" ' +
                    'SET value = ? WHERE key = "balance__"',
                   [ balance ])
     }
@@ -301,23 +327,42 @@ class ServiceManager {
       .call(this, ledgerPrefix, balance)
   }
 
-  _getLedgerDbPath (ledgerPrefix) {
-    return path.resolve(this.dataDir, './' + ledgerPrefix + 'sqlite')
+  _getDbConnectionString (ledgerPrefix) {
+    return 'postgres://' + this.dbUser + '@localhost/' + ledgerPrefix
   }
 
   * _getLedgerDb (ledgerPrefix) {
-    const dbPath = this._getLedgerDbPath(ledgerPrefix)
-    return yield sqlite.open(dbPath)
+    if (!this.dbs[ledgerPrefix]) {
+      this.dbs[ledgerPrefix] = pgp({
+        database: ledgerPrefix,
+        user: this.dbUser
+      })
+    }
+    return this.dbs[ledgerPrefix]
+  }
+
+  * _createPostgresDb (dbName) {
+    try {
+      yield masterdb.none('CREATE DATABASE "' + dbName + '"')
+    } catch (e) {
+      if (e.code && e.code === '42P04') { // 42P04 = db already exists
+        yield masterdb.none('DROP DATABASE "' + dbName + '"')
+        yield this._createPostgresDb(dbName)
+      } else {
+        throw new Error('Could not create test database: ' + e)
+      }
+    }
   }
 
   * _getBalance (ledger, name, options) {
     const db = yield this._getLedgerDb(ledger)
-    const balance = yield db.get('SELECT BALANCE FROM L_ACCOUNTS WHERE NAME = ?', name)
+    const row = yield db.one('SELECT "BALANCE" FROM "L_ACCOUNTS" WHERE "NAME" = $1', name)
+    const balance = parseFloat(row.BALANCE)
     const scale = (typeof this.ledgerOptions[ledger].scale !== 'undefined')
       ? this.ledgerOptions[ledger].scale
       : LEDGER_DEFAULT_SCALE
 
-    return Number(balance.BALANCE.toFixed(scale))
+    return Number(balance.toFixed(scale))
   }
 
   getBalance (ledger, name, options) {
