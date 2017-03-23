@@ -12,6 +12,7 @@ const hashPassword = require('five-bells-shared/utils/hashPassword')
 const pgp = require('pg-promise')()
 // Connection to the postgres master db shared by all ServiceManager instances
 const masterdb = pgp({database: 'postgres'})
+const uuid = require('uuid')
 
 const COMMON_ENV = Object.assign({}, {
   // Path is required for NPM to work properly
@@ -61,7 +62,6 @@ class ServiceManager {
     this.connectors = {} // { connectorAccount ⇒ [ ["source_asset@source_ledger", "destination_asset@destination_ledger"] ] }
     this.receivers = {} // { name ⇒ Receiver }
 
-    this.Client = require(path.resolve(depsDir, 'ilp-core')).Client
     this.FiveBellsLedger = require(path.resolve(depsDir, 'ilp-plugin-bells'))
     this.ilp = require(path.resolve(depsDir, 'ilp'))
 
@@ -240,9 +240,12 @@ class ServiceManager {
    */
   startReceiver (credentials) {
     const receiver = this.receivers[credentials.prefix] =
-      this.ilp.createReceiver(
-        Object.assign({ _plugin: this.FiveBellsLedger }, credentials))
-    return receiver.listen()
+      new (this.FiveBellsLedger)(credentials)
+    return receiver.connect().then(() => {
+      return this.ilp.IPR.listen(receiver, {
+        receiverSecret: Buffer.from('secret')
+      }, ({ fulfill }) => fulfill())
+    })
   }
 
   /**
@@ -384,41 +387,97 @@ class ServiceManager {
   }
 
   * sendPaymentBySourceAmount (clientOpts, params) {
-    const client = new this.Client(clientOpts)
-    yield client.connect()
-
     const sourceLedger = parseAddress(params.sourceAccount).ledger
     const destinationLedger = parseAddress(params.destinationAccount).ledger
     const sourceScale = this.ledgerOptions[sourceLedger].scale || LEDGER_DEFAULT_SCALE
     const sourceAmountInteger = (new BigNumber(params.sourceAmount)).shift(sourceScale)
 
-    const quote = yield client.quote({
+    const sender = new (this.FiveBellsLedger)(clientOpts)
+    yield sender.connect()
+
+    const receiver = this.receivers[destinationLedger]
+
+    const quote = yield this.ilp.ILQP.quote(sender, {
       sourceAmount: sourceAmountInteger.toString(),
       destinationAddress: params.destinationAccount
     })
-    const paymentRequest = this.receivers[destinationLedger].createRequest(
-      {amount: quote.destinationAmount})
-    const sourceExpiryDuration = quote.sourceExpiryDuration || 5
-    const executionCondition = params.executionCondition || paymentRequest.condition
 
-    yield client.sendQuotedPayment(Object.assign(quote, {
-      destinationAccount: paymentRequest.address,
-      destinationAmount: paymentRequest.amount,
-      destinationLedger: destinationLedger,
-      expiresAt: (new Date(Date.now() + sourceExpiryDuration * 1000)).toISOString(),
-      destinationMemo: Object.assign({
-        expires_at: paymentRequest.expires_at,
-        data: paymentRequest.data
-      }, params.overrideMemoParams),
-      executionCondition: params.unsafeOptimisticTransport ? undefined : executionCondition,
-      unsafeOptimisticTransport: params.unsafeOptimisticTransport
-    }))
+    if (params.overrideMemoParams) {
+      params.overrideMemoParams.expiresAt = params.overrideMemoParams.expires_at
+    }
+
+    const { packet, condition } = this.ilp.IPR.createPacketAndCondition(
+      Object.assign({
+        receiverSecret: Buffer.from('secret'),
+        destinationAccount: receiver.getAccount(),
+        destinationAmount: quote.destinationAmount
+      }, params.overrideMemoParams))
+
+    const executionCondition = params.executionCondition || condition
+
+    yield sender.sendTransfer({
+      id: uuid(),
+      account: quote.connectorAccount,
+      amount: sourceAmountInteger.toString(),
+      ilp: packet,
+      expiresAt: params.unsafeOptimisticTransport ? undefined : quote.expiresAt,
+      executionCondition: params.unsafeOptimisticTransport ? undefined : executionCondition
+    })
+
+    if (!params.unsafeOptimisticTransport) {
+      yield new Promise((resolve, reject) => {
+        const done = () => {
+          sender.removeListener('outgoing_fulfill', done)
+          sender.removeListener('outgoing_reject', handleReject)
+          resolve()
+        }
+
+        const handleReject = (transfer, reason) => {
+          try {
+            if (params.onOutgoingReject) {
+              params.onOutgoingReject(transfer, reason)
+            }
+            done()
+          } catch (e) {
+            reject(e)
+          }
+        }
+
+        sender.on('outgoing_fulfill', done)
+        sender.on('outgoing_reject', handleReject)
+      })
+    }
+  }
+
+  * sendPaymentByDestinationAmount (clientOpts, params) {
+    if (params.unsafeOptimisticTransport) {
+      throw new Error('ServiceManager#sendPaymentByDestinationAmount doesn\'t support unsafeOptimisticTransport')
+    }
+
+    const sender = new (this.FiveBellsLedger)(clientOpts)
+    const destinationLedger = parseAddress(params.destinationAccount).ledger
+    const destinationScale = this.ledgerOptions[destinationLedger].scale || LEDGER_DEFAULT_SCALE
+    const destinationAmountInteger = (new BigNumber(params.destinationAmount)).shift(destinationScale)
+    const { packet, condition } = this.ilp.IPR.createPacketAndCondition({
+      receiverSecret: Buffer.from('secret'),
+      destinationAccount: this.receivers[destinationLedger].getAccount(),
+      destinationAmount: destinationAmountInteger.toString()
+    })
+    const quote = yield this.ilp.ILQP.quoteByPacket(sender, packet)
+    const result = yield sender.sendTransfer({
+      id: uuid(),
+      amount: quote.sourceAmount,
+      account: quote.connectorAccount,
+      ilp: packet,
+      expiresAt: quote.expiresAt,
+      executionCondition: condition
+    })
 
     if (!params.unsafeOptimisticTransport) {
       yield new Promise((resolve) => {
         const done = () => {
-          client.removeListener('outgoing_fulfill', done)
-          client.removeListener('outgoing_reject', handleReject)
+          sender.removeListener('outgoing_fulfill', done)
+          sender.removeListener('outgoing_reject', handleReject)
           resolve()
         }
 
@@ -429,25 +488,11 @@ class ServiceManager {
           done()
         }
 
-        client.on('outgoing_fulfill', done)
-        client.on('outgoing_reject', handleReject)
+        sender.on('outgoing_fulfill', done)
+        sender.on('outgoing_reject', handleReject)
       })
     }
-  }
 
-  * sendPaymentByDestinationAmount (clientOpts, params) {
-    if (params.unsafeOptimisticTransport) {
-      throw new Error('ServiceManager#sendPaymentByDestinationAmount doesn\'t support unsafeOptimisticTransport')
-    }
-
-    const sender = this.ilp.createSender(clientOpts)
-    const destinationLedger = parseAddress(params.destinationAccount).ledger
-    const destinationScale = this.ledgerOptions[destinationLedger].scale || LEDGER_DEFAULT_SCALE
-    const destinationAmountInteger = (new BigNumber(params.destinationAmount)).shift(destinationScale)
-    const paymentRequest = this.receivers[destinationLedger].createRequest(
-      {amount: destinationAmountInteger.toString()})
-    const paymentParams = yield sender.quoteRequest(paymentRequest)
-    const result = yield sender.payRequest(paymentParams)
     return result
   }
 

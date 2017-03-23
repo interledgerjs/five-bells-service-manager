@@ -29,7 +29,8 @@
     "pg-promise": "^5.6.4",
     "superagent": "^3.1.0",
     "supports-color": "^3.1.2",
-    "through2": "^2.0.1"
+    "through2": "^2.0.1",
+    "uuid": "^3.0.1"
   },
   "devDependencies": {
     "eslint": "^3.5.0",
