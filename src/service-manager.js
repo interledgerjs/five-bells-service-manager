@@ -415,7 +415,7 @@ class ServiceManager {
 
     const executionCondition = params.executionCondition || condition
 
-    yield sender.sendTransfer({
+    const result = yield sender.sendTransfer({
       id: uuid(),
       account: quote.connectorAccount,
       amount: sourceAmountInteger.toString(),
@@ -424,29 +424,31 @@ class ServiceManager {
       executionCondition: params.unsafeOptimisticTransport ? undefined : executionCondition
     })
 
+    function cleanup () {
+      sender.removeAllListeners()
+      return sender.disconnect()
+    }
+
     if (!params.unsafeOptimisticTransport) {
       yield new Promise((resolve, reject) => {
-        const done = () => {
-          sender.removeListener('outgoing_fulfill', done)
-          sender.removeListener('outgoing_reject', handleReject)
-          resolve()
-        }
-
         const handleReject = (transfer, reason) => {
           try {
             if (params.onOutgoingReject) {
               params.onOutgoingReject(transfer, reason)
             }
-            done()
+            resolve()
           } catch (e) {
-            reject(e)
+            cleanup().then(() => reject(e))
           }
         }
 
-        sender.on('outgoing_fulfill', done)
+        sender.on('outgoing_fulfill', cleanup().then(resolve))
         sender.on('outgoing_reject', handleReject)
       })
     }
+
+    yield cleanup()
+    return result
   }
 
   * sendPaymentByDestinationAmount (clientOpts, params) {
@@ -473,26 +475,30 @@ class ServiceManager {
       executionCondition: condition
     })
 
+    function cleanup () {
+      sender.removeAllListeners()
+      return sender.disconnect()
+    }
+
     if (!params.unsafeOptimisticTransport) {
-      yield new Promise((resolve) => {
-        const done = () => {
-          sender.removeListener('outgoing_fulfill', done)
-          sender.removeListener('outgoing_reject', handleReject)
-          resolve()
-        }
-
+      yield new Promise((resolve, reject) => {
         const handleReject = (transfer, reason) => {
-          if (params.onOutgoingReject) {
-            params.onOutgoingReject(transfer, reason)
+          try {
+            if (params.onOutgoingReject) {
+              params.onOutgoingReject(transfer, reason)
+            }
+            resolve()
+          } catch (e) {
+            cleanup().then(() => reject(e))
           }
-          done()
         }
 
-        sender.on('outgoing_fulfill', done)
+        sender.on('outgoing_fulfill', cleanup().then(resolve))
         sender.on('outgoing_reject', handleReject)
       })
     }
 
+    yield cleanup()
     return result
   }
 
