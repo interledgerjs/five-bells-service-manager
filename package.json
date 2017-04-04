@@ -27,6 +27,7 @@
     "co": "^4.6.0",
     "five-bells-shared": "^21.0.1",
     "pg-promise": "^5.6.4",
+    "rimraf": "^2.6.1",
     "superagent": "^3.1.0",
     "supports-color": "^3.1.2",
     "through2": "^2.0.1",

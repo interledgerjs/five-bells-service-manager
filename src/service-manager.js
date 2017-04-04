@@ -13,6 +13,7 @@ const pgp = require('pg-promise')()
 // Connection to the postgres master db shared by all ServiceManager instances
 const masterdb = pgp({database: 'postgres'})
 const uuid = require('uuid')
+const rimraf = require('rimraf')
 
 const COMMON_ENV = Object.assign({}, {
   // Path is required for NPM to work properly
@@ -41,6 +42,7 @@ class ServiceManager {
     this.depsDir = depsDir
     this.dataDir = dataDir
     try {
+      rimraf.sync(dataDir, {disableGlob: true})
       fs.mkdirSync(dataDir)
     } catch (err) {
       if (err.code !== 'EEXIST') throw err
