@@ -442,7 +442,7 @@ class ServiceManager {
           }
         }
 
-        sender.on('outgoing_fulfill', cleanup().then(resolve))
+        sender.on('outgoing_fulfill', () => cleanup().then(resolve))
         sender.on('outgoing_reject', handleReject)
       })
     }
@@ -493,7 +493,7 @@ class ServiceManager {
           }
         }
 
-        sender.on('outgoing_fulfill', cleanup().then(resolve))
+        sender.on('outgoing_fulfill', () => cleanup().then(resolve))
         sender.on('outgoing_reject', handleReject)
       })
     }
