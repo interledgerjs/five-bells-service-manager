@@ -5,6 +5,8 @@ test:
   override:
     # Run lint
     - npm run lint
+    # Run integration tests (try this at home: https://github.com/interledgerjs/five-bells-integration-test/#installation)
+    - npm run integration
     # Run tests with coverage
     #- npm test --coverage -- -R spec-xunit-file
     # Extract test artifacts

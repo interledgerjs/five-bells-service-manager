@@ -4,7 +4,8 @@
   "description": "A module to configure and run Five Bells services for testing.",
   "main": "index.js",
   "scripts": {
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "integration": "ln -s `pwd` node_modules/five-bells-service-manager && integration-loader && integration all"
   },
   "repository": {
     "type": "git",
@@ -37,6 +38,13 @@
     "eslint": "^3.5.0",
     "eslint-config-standard": "^6.0.1",
     "eslint-plugin-promise": "^3.4.0",
-    "eslint-plugin-standard": "^2.0.0"
+    "eslint-plugin-standard": "^2.0.0",
+    "five-bells-integration-test-loader": "^1.0.1"
+  },
+  "config": {
+    "five-bells-integration-test-loader": {
+      "module": "five-bells-integration-test",
+      "repo": "interledgerjs/five-bells-integration-test"
+    }
   }
 }
