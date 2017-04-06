@@ -1,5 +1,7 @@
 'use strict'
 
+this should break on circleci.com
+
 const assert = require('assert')
 const path = require('path')
 const fs = require('fs')
