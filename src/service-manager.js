@@ -263,11 +263,10 @@ class ServiceManager {
     const db = yield this._getLedgerDb(ledger)
     const password = (yield hashPassword(name)).toString('base64')
     yield db.none( // insert or update account
-      'INSERT INTO "L_ACCOUNTS" AS t ("NAME", "PASSWORD_HASH", "BALANCE") ' +
+      'INSERT INTO "L_ACCOUNTS" ("NAME", "PASSWORD_HASH", "BALANCE") ' +
         'VALUES ($/name/, $/password/, $/balance/) ' +
         'ON CONFLICT ("NAME") DO UPDATE ' +
-        'SET "PASSWORD_HASH"=$/password/, "BALANCE"=$/balance/ ' +
-        'WHERE t."NAME"=$/name/',
+        'SET "PASSWORD_HASH"=$/password/, "BALANCE"=$/balance/',
       { // named parameters
         name: name,
         password: password,
@@ -306,7 +305,7 @@ class ServiceManager {
       const pluginStore = yield db.one('SELECT table_name ' +
                                        'FROM information_schema.tables ' +
                                        'WHERE table_name ~ \'^plugin_store_\'')
-      return pluginStore
+      return pluginStore.table_name
     } catch (e) {
       if (e.code === pgp.errors.queryResultErrorCode.noData) {
         // sometimes the plugin store table does not exist yet,
@@ -322,8 +321,8 @@ class ServiceManager {
     const pluginStore = yield this._getPluginStoreTable(ledgerPrefix)
     if (pluginStore) {
       yield db.none('UPDATE "' + pluginStore + '" ' +
-                   'SET value = ? WHERE key = "balance__"',
-                  [ balance ])
+                   'SET "value"=$/balance/ WHERE "key"=\'balance__\'',
+                   { balance })
     }
   }
 
