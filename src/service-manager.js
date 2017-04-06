@@ -1,6 +1,6 @@
 'use strict'
 
-this should break on circleci.com
+this.should('break')
 
 const assert = require('assert')
 const path = require('path')
