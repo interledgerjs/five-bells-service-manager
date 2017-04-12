@@ -305,7 +305,7 @@ class ServiceManager {
     try {
       const pluginStore = yield db.one('SELECT table_name ' +
                                        'FROM information_schema.tables ' +
-                                       'WHERE table_name ~ \'^plugin_store_\'')
+                                       'WHERE table_name ~ $1', '^plugin_store_')
       return pluginStore
     } catch (e) {
       if (e.code === pgp.errors.queryResultErrorCode.noData) {
@@ -321,9 +321,7 @@ class ServiceManager {
     const db = yield this._getLedgerDb(ledgerPrefix)
     const pluginStore = yield this._getPluginStoreTable(ledgerPrefix)
     if (pluginStore) {
-      yield db.none('UPDATE "' + pluginStore + '" ' +
-                   'SET value = ? WHERE key = "balance__"',
-                  [ balance ])
+      yield db.none('UPDATE $1~ SET value = $2 WHERE key = $3', [pluginStore, balance, 'balance__' ])
     }
   }
 
@@ -348,10 +346,10 @@ class ServiceManager {
 
   * _createPostgresDb (dbName) {
     try {
-      yield masterdb.none('CREATE DATABASE "' + dbName + '"')
+      yield masterdb.none('CREATE DATABASE $1~', dbName)
     } catch (e) {
       if (e.code && e.code === '42P04') { // 42P04 = db already exists
-        yield masterdb.none('DROP DATABASE "' + dbName + '"')
+        yield masterdb.none('DROP DATABASE $1~', dbName)
         yield this._createPostgresDb(dbName)
       } else {
         throw new Error('Could not create test database: ' + e)
@@ -361,8 +359,7 @@ class ServiceManager {
 
   * _getBalance (ledger, name, options) {
     const db = yield this._getLedgerDb(ledger)
-    const row = yield db.one('SELECT "BALANCE" FROM "L_ACCOUNTS" WHERE "NAME" = $1', name)
-    const balance = parseFloat(row.BALANCE)
+    const balance = yield db.one('SELECT "BALANCE" FROM "L_ACCOUNTS" WHERE "NAME" = $1', name, a => parseFloat(a.BALANCE))
     const scale = (typeof this.ledgerOptions[ledger].scale !== 'undefined')
       ? this.ledgerOptions[ledger].scale
       : LEDGER_DEFAULT_SCALE
