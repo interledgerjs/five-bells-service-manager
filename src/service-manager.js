@@ -509,10 +509,11 @@ class ServiceManager {
       .post(this.ledgers[ledger] + '/messages')
       .auth(params.username, params.password)
       .send({
+        id: uuid(),
         ledger: this.ledgers[ledger],
         from: this.ledgers[ledger] + '/accounts/' + encodeURIComponent(params.username),
         to: this.ledgers[ledger] + '/accounts/' + encodeURIComponent(params.connectorName),
-        data: {
+        custom: {
           method: 'broadcast_routes',
           data: routes
         }
