@@ -132,6 +132,7 @@ class ServiceManager {
     // this overwrites values set in the config file
     const customEnv = {
       API_CONFIG_FILE: config.apiConfigFile || '',
+      CLIENT_PORT: config.CLIENT_PORT,
       DB_URI: dbUri,
       LEDGER_AMOUNT_SCALE: config.scale || String(LEDGER_DEFAULT_SCALE)
     }
