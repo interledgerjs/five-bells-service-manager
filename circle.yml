@@ -8,10 +8,7 @@ test:
     # Run integration tests (try this at home: https://github.com/interledgerjs/five-bells-integration-test/#installation)
     - ./node_modules/.bin/integration-loader && ./node_modules/.bin/integration setup
     - ln -s `pwd` node_modules/five-bells-service-manager
-    - ./node_modules/.bin/integration test index
-    - ./node_modules/.bin/integration test advanced
-    - ./node_modules/.bin/integration test connector_first
-    - ./node_modules/.bin/integration test ilp-kit
+    - if git log -1 --pretty=%B | grep -qF "[skip tests]"; then true; else ./node_modules/.bin/integration test; fi
     # Run tests with coverage
     #- npm test --coverage -- -R spec-xunit-file
     # Extract test artifacts
