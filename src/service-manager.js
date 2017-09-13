@@ -145,7 +145,7 @@ class ServiceManager {
     let loggingPrefix = `ilp-kit[${kitName}]`
 
     // kit will start ledger and connector by itself
-    return this._npm(['start'], loggingPrefix, npmOpts, 'wallet listening on 0.0.0.0:')
+    return this._npm(['start'], loggingPrefix, npmOpts, 'Note that the development build is not optimized.')
   }
 
   startKit (kitName, config) {
