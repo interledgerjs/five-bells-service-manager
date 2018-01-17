@@ -134,16 +134,16 @@ class ServiceManager {
 
   startConnector (name, options) {
     return this._npm(['start'], name, {
-      env: Object.assign({}, COMMON_ENV, {
+      env: Object.assign({}, COMMON_ENV, omitUndefined({
         CONNECTOR_STORE: 'memdown',
         CONNECTOR_ILP_ADDRESS: options.ilpAddress,
         CONNECTOR_ACCOUNTS: JSON.stringify(options.accounts),
         CONNECTOR_ROUTES: JSON.stringify(options.routes || []),
         CONNECTOR_ROUTE_EXPIRY: 11 * 60 * 1000, // don't expire routes
-        CONNECTOR_SPREAD: options.spread || '0.002',
-        CONNECTOR_SLIPPAGE: options.slippage || '0.001',
+        CONNECTOR_SPREAD: options.spread,
+        CONNECTOR_SLIPPAGE: options.slippage,
         CONNECTOR_BACKEND: options.backend || 'one-to-one'
-      }),
+      })),
       cwd: path.resolve(this.depsDir, 'ilp-connector')
     }, 'connector ready')
   }
@@ -283,6 +283,15 @@ class ServiceManager {
     }))
     return this.ilpPacket.deserializeIlpPacket(result)
   }
+}
+
+function omitUndefined (src) {
+  const dst = {}
+  for (const key in src) {
+    const val = src[key]
+    if (val !== undefined) dst[key] = src[key]
+  }
+  return dst
 }
 
 module.exports = ServiceManager
