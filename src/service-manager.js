@@ -171,55 +171,8 @@ class ServiceManager {
       `Balance should be ${expectedBalance}, but is ${receiver.balance}`)
   }
 
-  async updateKitAccount (ledgerPrefix, username) {
-    const db = await this._getLedgerDb(ledgerPrefix)
-    await db.none(
-      'INSERT INTO "Users" (username, created_at, updated_at) VALUES ($1, $2, $3) ' +
-      'ON CONFLICT DO NOTHING',
-      [ username, '2017-01-10 16:12:17.039 +00:00', '2017-01-10 16:12:17.039 +00:00' ]
-    )
-  }
-
-  async _getPluginStoreTable (ledgerPrefix) {
-    const db = await this._getLedgerDb(ledgerPrefix)
-    try {
-      const pluginStore = await db.one('SELECT table_name ' +
-                                       'FROM information_schema.tables ' +
-                                       'WHERE table_name ~ \'^plugin_store_\'')
-      return pluginStore.table_name
-    } catch (e) {
-      if (e.code === pgp.errors.queryResultErrorCode.noData) {
-        // sometimes the plugin store table does not exist yet,
-        // because no transfer has yet been send
-        return ''
-      }
-      throw e
-    }
-  }
-
-  async updateTrustlineBalance (ledgerPrefix, balance) {
-    const db = await this._getLedgerDb(ledgerPrefix)
-    const pluginStore = await this._getPluginStoreTable(ledgerPrefix)
-    if (pluginStore) {
-      await db.none(
-        'UPDATE "' + pluginStore + '" ' +
-        'SET "value"=$/balance/ WHERE "key"=\'balance__\'',
-        { balance })
-    }
-  }
-
   _getDbConnectionString (ledgerPrefix) {
     return 'postgres://' + this.dbUser + '@localhost/' + ledgerPrefix
-  }
-
-  async _getLedgerDb (ledgerPrefix) {
-    if (!this.dbs[ledgerPrefix]) {
-      this.dbs[ledgerPrefix] = pgp({
-        database: ledgerPrefix,
-        user: this.dbUser
-      })
-    }
-    return this.dbs[ledgerPrefix]
   }
 
   async _createPostgresDb (dbName) {
