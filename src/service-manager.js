@@ -48,8 +48,11 @@ class ServiceManager {
 
     this.Plugin = require(path.resolve(depsDir, 'ilp-plugin-btp'))
     this.ilp = require(path.resolve(depsDir, 'ilp'))
-    this.ILDCP = require(path.resolve(depsDir, 'ilp/node_modules/ilp-protocol-ildcp'))
-    this.ilpPacket = require(path.resolve(depsDir, 'ilp/node_modules/ilp-packet'))
+
+    // Load some dependencies from ILP module
+    const ilpModule = require.cache[require.resolve(path.resolve(depsDir, 'ilp'))]
+    this.ILDCP = ilpModule.require('ilp-protocol-ildcp')
+    this.ilpPacket = ilpModule.require('ilp-packet')
 
     process.on('exit', this.killAll.bind(this))
     process.on('SIGINT', this.killAll.bind(this))
