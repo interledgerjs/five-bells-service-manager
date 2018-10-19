@@ -10,7 +10,7 @@ const through2 = require('through2')
  */
 function spawnParallel (cmd, args, opts, formatter) {
   const proc = childProcess.spawn(cmd, args,
-    Object.assign({}, opts, {stdio: 'pipe'}))
+    Object.assign({}, opts, { stdio: 'pipe' }))
 
   // Add prefix to output to distinguish processes
   if (typeof formatter === 'function') {
