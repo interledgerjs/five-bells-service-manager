@@ -4,10 +4,10 @@ const assert = require('assert')
 const path = require('path')
 const util = require('./util')
 const chalk = require('chalk')
-const BigNumber = require('bignumber.js')
+
 const pgp = require('pg-promise')()
 // Connection to the postgres master db shared by all ServiceManager instances
-const masterdb = pgp({database: 'postgres'})
+const masterdb = pgp({ database: 'postgres' })
 
 const COMMON_ENV = Object.assign({}, {
   // Path is required for NPM to work properly
@@ -47,12 +47,15 @@ class ServiceManager {
     this.receivers = [] // [Plugin]
 
     this.Plugin = require(path.resolve(depsDir, 'ilp-plugin-btp'))
-    this.ilp = require(path.resolve(depsDir, 'ilp'))
 
     // Load some dependencies from ILP module
-    const ilpModule = require.cache[require.resolve(path.resolve(depsDir, 'ilp'))]
-    this.ILDCP = ilpModule.require('ilp-protocol-ildcp')
-    this.ilpPacket = ilpModule.require('ilp-packet')
+    // const ilpModule = require.cache[require.resolve(path.resolve(depsDir, 'ilp'))]
+    // this.ILDCP = ilpModule.require('ilp-protocol-ildcp')
+    // this.ilpPacket = ilpModule.require('ilp-packet')
+    // this.stream = ilpModule.require('ilp-protocol-stream')
+    this.ILDCP = require(path.resolve(depsDir, 'ilp-protocol-ildcp'))
+    this.ilpPacket = require(path.resolve(depsDir, 'ilp-packet'))
+    this.stream = require(path.resolve(depsDir, 'ilp-protocol-stream'))
 
     process.on('exit', this.killAll.bind(this))
     process.on('SIGINT', this.killAll.bind(this))
@@ -152,26 +155,76 @@ class ServiceManager {
   }
 
   async startSender (opts) {
-    const sender = new (this.Plugin)(opts)
-    await sender.connect()
-    return sender
+    const plugin = new (this.Plugin)(opts)
+    await plugin.connect()
+
+    const connections = {}
+    return {
+      plugin,
+      connections,
+      getConnection: async (destinationAccount, sharedSecret) => {
+        const key = `${destinationAccount}:${sharedSecret.toString('hex')}`
+        if (connections[key]) {
+          return connections[key]
+        }
+        const connection = await this.stream.createConnection({
+          plugin,
+          destinationAccount,
+          sharedSecret
+        })
+        connections[key] = connection
+        return connection
+      },
+      disconnect: async () => {
+        plugin.disconnect()
+      }
+    }
   }
 
   async startReceiver (opts) {
-    const receiver = new (this.Plugin)(opts)
-    await this.ilp.IPR.listen(receiver, {
-      receiverSecret: Buffer.from('secret')
-    }, ({ destinationAmount, fulfill }) => {
-      receiver.balance = new BigNumber(receiver.balance || 0).add(destinationAmount).toString()
-      return fulfill()
+    const plugin = new (this.Plugin)(opts)
+
+    await plugin.connect()
+
+    const server = await this.stream.createServer({
+      plugin
     })
+
+    const receiver = Object.assign({
+      plugin,
+      receivedMoney: 0,
+      receivedData: Buffer.alloc(0),
+      disconnect: async () => {
+        plugin.disconnect()
+      }
+    }, server.generateAddressAndSecret())
+
+    server.on('connection', (connection) => {
+      connection.on('stream', (stream) => {
+        // Set the maximum amount of money this stream can receive
+        stream.setReceiveMax(Infinity)
+        stream.on('money', (amount) => {
+          receiver.receivedMoney += Number(amount)
+        })
+        stream.on('data', (chunk) => {
+          receiver.receivedData = Buffer.concat(receiver.receivedData, chunk)
+        })
+      })
+    })
+    // await this.ilp.IPR.listen(receiver, {
+    //   receiverSecret: Buffer.from('secret')
+    // }, ({ destinationAmount, fulfill }) => {
+    //   receiver.balance = new BigNumber(receiver.balance || 0).add(destinationAmount).toString()
+    //   return fulfill()
+    // })
+
     this.receivers.push(receiver)
     return receiver
   }
 
   assertBalance (receiver, expectedBalance) {
-    assert.equal(receiver.balance, expectedBalance,
-      `Balance should be ${expectedBalance}, but is ${receiver.balance}`)
+    assert.strictEqual(receiver.receivedMoney, expectedBalance,
+      `Balance should be ${expectedBalance}, but is ${receiver.receivedMoney}`)
   }
 
   _getDbConnectionString (ledgerPrefix) {
@@ -191,7 +244,7 @@ class ServiceManager {
     }
   }
 
-  // TODO change from IPR to PSK2 when its ready
+  // TODO - Handle sendPaymentByDestinationAmount
   sendPayment (params) {
     return params.sourceAmount
       ? this.sendPaymentBySourceAmount(params)
@@ -199,45 +252,19 @@ class ServiceManager {
   }
 
   async sendPaymentBySourceAmount (params) {
-    const {sender, receiver, sourceAmount} = params
-    const destinationAccount = (await this.ILDCP.fetch(receiver.sendData.bind(receiver))).clientAddress
-    const quote = await this.ilp.ILQP.quote(sender, {
-      sourceAmount,
-      destinationAddress: destinationAccount
-    })
-    const { packet, condition } = this.ilp.IPR.createPacketAndCondition(
-      Object.assign({
-        receiverSecret: Buffer.from('secret'),
-        destinationAccount,
-        destinationAmount: quote.destinationAmount
-      }, params.overrideMemoParams))
-    const result = await sender.sendData(this.ilpPacket.serializeIlpPrepare({
-      amount: sourceAmount,
-      executionCondition: condition,
-      expiresAt: new Date(quote.expiresAt),
-      destination: destinationAccount,
-      data: packet
-    }))
-    return this.ilpPacket.deserializeIlpPacket(result)
+    const { sender, receiver, sourceAmount } = params
+    const { destinationAccount, sharedSecret } = receiver
+
+    const connection = await sender.getConnection(destinationAccount, sharedSecret)
+    const stream = connection.createStream()
+    await stream.sendTotal(sourceAmount)
+    stream.end()
   }
 
   async sendPaymentByDestinationAmount (params) {
-    const {sender, receiver, destinationAmount} = params
-    const destinationAccount = (await this.ILDCP.fetch(receiver.sendData.bind(receiver))).clientAddress
-    const { packet, condition } = this.ilp.IPR.createPacketAndCondition({
-      receiverSecret: Buffer.from('secret'),
-      destinationAccount,
-      destinationAmount
-    })
-    const quote = await this.ilp.ILQP.quoteByPacket(sender, packet)
-    const result = await sender.sendData(this.ilpPacket.serializeIlpPrepare({
-      amount: quote.sourceAmount,
-      executionCondition: condition,
-      expiresAt: new Date(quote.expiresAt),
-      destination: destinationAccount,
-      data: packet
-    }))
-    return this.ilpPacket.deserializeIlpPacket(result)
+    // const { sender, receiver, sourceAmount } = params
+    // const { destinationAccount, sharedSecret } = receiver
+    throw new Error('Send by destination not implemented')
   }
 }
 
